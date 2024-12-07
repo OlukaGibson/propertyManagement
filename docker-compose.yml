@@ -1,0 +1,14 @@
+version: '3.8'
+services:
+  flask_app:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      FLASK_APP: propertymngt
+      FLASK_ENV: development
+    command: gunicorn -b :5000 propertymngt:app
+    volumes:
+      - .:/app
+    depends_on:
+      - db

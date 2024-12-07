@@ -1,0 +1,11 @@
+runtime: python311
+
+env_variables:
+  FLASK_APP: propertymngt
+  FLASK_ENV: development
+
+entrypoint: gunicorn -b :$PORT propertymngt:app
+
+handlers:
+- url: /*
+  script: auto
