@@ -31,6 +31,12 @@ for folder_name in os.listdir(KNOWN_FACES_DIR):
             known_face_names.append(folder_name)
 
 
+# Define a route for landing page
+@propertymngt.route('/')
+def device_storage():
+    print('Device storage is full!')
+    return {'message': 'Device storage is full!'}
+
 @propertymngt.route('/recognize', methods=['POST'])
 def recognize_faces():
     """
