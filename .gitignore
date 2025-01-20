@@ -2,4 +2,4 @@
 .flaskenv
 __pycache__/
 venv/
-instance/
+instance/credentials.json
