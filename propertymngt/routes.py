@@ -118,7 +118,7 @@ def get_users():
     return jsonify(user_list)
 
 # display specific user
-@propertymngt.route('user/get_user/<int:id>', methods=['GET'])
+@propertymngt.route('/user/get_user/<int:id>', methods=['GET'])
 def get_specific_user(id):
     user = db.session.query(Users).filter_by(id=id).first()
     
@@ -179,7 +179,7 @@ def get_devices():
     return jsonify(devices_list)
 
 # retrive specific device
-@propertymngt.route('/device/get_user/<int:id', methods=['GET'])
+@propertymngt.route('/device/get_user/<int:id>', methods=['GET'])
 def get_device(id):
     device = db.session.query(Devices).filter_by(id=id).first()
     if device:
