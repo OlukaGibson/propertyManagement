@@ -22,7 +22,7 @@ def create_app():
 
     app.register_blueprint(propertymngt)
 
-    CORS(app, origins=["http://localhost:3000"])
+    CORS(app, origins=["http://localhost:3000","*"])
 
     app.debug = True
 

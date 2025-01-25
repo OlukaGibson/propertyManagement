@@ -67,7 +67,7 @@ def register_user():
 
     storage_client = storage.Client(credentials=credentials)
     bucket = storage_client.bucket(os.getenv('BUCKET_NAME'))
-    blob = bucket.blob(f'{username}.jpg')
+    blob = bucket.blob(f'faces/{username}/{username}.jpg')
     blob.upload_from_file(file, content_type='application/octet-stream')
     
     new_user = Users(
