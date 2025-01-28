@@ -81,6 +81,22 @@ def register_user():
 
     return{'message':'User successfuly registered'}
 
+#login user
+@propertymngt.route('/user/login', methods=['POST'])
+def login_user():
+    username = request.form['username']
+    password = request.form['password']
+
+    user = db.session.query(Users).filter_by(username=username).first()
+
+    if not user:
+        return {'message' : 'User not found'}, 404
+
+    if user.password != password:
+        return {'message' : 'Invalid password'}, 401
+
+    return {'message' : 'User logged in successfully'}
+
 #edit user
 @propertymngt.route('/user/<int:id>/edit', methods=['POST'])
 def edit_user(id):
