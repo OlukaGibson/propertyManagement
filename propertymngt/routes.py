@@ -69,6 +69,12 @@ def register_user():
     bucket = storage_client.bucket(os.getenv('BUCKET_NAME'))
     blob = bucket.blob(f'faces/{username}/{username}.jpg')
     blob.upload_from_file(file, content_type='application/octet-stream')
+
+    # Save the image locally
+    faces_dir = os.path.join('propertymngt', 'faces', username)
+    os.makedirs(faces_dir, exist_ok=True)
+    local_image_path = os.path.join(faces_dir, f'{username}.jpg')
+    file.save(local_image_path)
     
     new_user = Users(
         username=username,
