@@ -4,7 +4,7 @@ import json
 import io
 import os
 from .extentions import db
-from .models import Authentications, Users, Devices, Readings
+from .models import Authentications, Users, Devices, Readings, Rooms, RoomAccess, UserRoomAccess
 import numpy as np
 from queue import Queue
 from werkzeug.utils import secure_filename
@@ -45,6 +45,9 @@ for folder_name in os.listdir(KNOWN_FACES_DIR):
             encoding = face_recognition.face_encodings(image)[0]
             known_face_encodings.append(encoding)
             known_face_names.append(folder_name)
+
+def clean_data(data):
+    return None if data == "" else data
 
 """"
 landing page
@@ -129,13 +132,17 @@ def get_users():
     users = db.session.query(Users).all()
     user_list = []
 
+    if not users:
+        return {'message' : 'No users found'}, 404
+    
     for user in users :
         user_dict = {
+            'id' : user.id,
             'username' : user.username,
             'email' : user.email
         }
 
-    user_list.append(user_dict)
+        user_list.append(user_dict)
 
     return jsonify(user_list)
 
@@ -157,6 +164,145 @@ def get_specific_user(id):
 
 
 """"
+Room management routes
+"""
+# add new room
+@propertymngt.route('/room/add', methods=['POST'])
+def add_room():
+    room_name = clean_data(request.form['room_name'])
+    room_number = clean_data(request.form['room_number'])
+
+    new_room = Rooms(
+        room_name=room_name,
+        room_number=room_number
+    )
+
+    db.session.add(new_room)
+    db.session.commit()
+
+    return {'message' : 'Room added successfully'}
+
+# display all rooms
+@propertymngt.route('/room/get_rooms', methods=['GET'])
+def get_rooms():
+    rooms = db.session.query(Rooms).all()
+    room_list = []
+
+    if not rooms:
+        return {'message' : 'No rooms found'}, 404
+    
+    for room in rooms:
+        room_dict = {
+            'id' : room.id,
+            'room_name' : room.room_name,
+            'room_number' : room.room_number
+        }
+
+        room_list.append(room_dict)
+
+    return jsonify(room_list)
+
+# display specific room
+@propertymngt.route('/room/get_room/<int:id>', methods=['GET'])
+def get_specific_room(id):
+    room = db.session.query(Rooms).filter_by(id=id).first()
+    if not room:
+        return {'message': 'Room not found'}, 404
+
+    room_dict = {
+        'roomID': room.id,
+        'room_name': room.room_name,
+        'room_number': room.room_number
+    }
+    device_list = []
+    users_access_list = []
+    user_list = []
+
+    # devices attached to the room
+    devices = db.session.query(Devices).filter_by(roomID=id).all()
+    if devices:
+        for device in devices:
+            device_dict = {
+                'deviceID': device.id,
+                'roomID': device.roomID,
+                'device_type': device.device_type,
+                'fields': {},
+                'readings': []  # Add readings key to store readings
+            }
+            for i in range(1, 9):
+                if getattr(device, f'field{i}') is not None:
+                    device_dict['fields'][f'field{i}'] = getattr(device, f'field{i}')
+
+            # readings from the device
+            readings = db.session.query(Readings).filter_by(deviceID=device.id).all()
+            if readings:
+                for reading in readings:
+                    reading_dict = {
+                        'readingID': reading.id,
+                        'deviceID': reading.deviceID,
+                        'fields': {}
+                    }
+                    for i in range(1, 9):
+                        if getattr(reading, f'field{i}') is not None:
+                            reading_dict['fields'][f'field{i}'] = getattr(reading, f'field{i}')
+                    device_dict['readings'].append(reading_dict)  # Add reading to device's readings
+
+            device_list.append(device_dict)
+
+    # users access to the room
+    users_access = db.session.query(UserRoomAccess).filter_by(roomID=id).all()
+    if users_access:
+        for user in users_access:
+            users_access_dict = {
+                'userID': user.userID,
+                'roomID': user.roomID,
+                'time_accessed': user.created_at
+            }
+            users_access_list.append(users_access_dict)
+
+    for user in users_access_list:
+        user = db.session.query(Users).filter_by(id=user['userID']).first()
+        if user:
+            user_dict = {
+                'userID': user.id,
+                'username': user.username,
+                'email': user.email
+            }
+            user_list.append(user_dict)
+
+    final_user_list = []
+    # get the userID, username, email from user_list and add the time_accessed from users_access_list
+    for access in users_access_list:
+        for user in user_list:
+            if user['userID'] == access['userID']:
+                access['username'] = user['username']
+                access['email'] = user['email']
+                final_user_list.append(access)
+
+    room_dict['devices'] = device_list
+    room_dict['users_access'] = final_user_list
+
+    return jsonify(room_dict)
+# edit room
+@propertymngt.route('/room/<int:id>/edit', methods=['POST'])
+def edit_room(id):
+    room = db.session.query(Rooms).filter_by(id=id).first()
+
+    if not room:
+        return {'message' : 'Room not found'}, 404
+
+    room_name = clean_data(request.form.get('room_name', room.room_name))
+    room_number = clean_data(request.form.get('room_number', room.room_number))
+
+    room.room_name = room_name
+    room.room_number = room_number
+
+    db.session.commit()
+
+    return {'message' : 'Room updated successfully'}
+
+
+""""
 Device managment routes
 """
 # add device type
@@ -164,16 +310,21 @@ Device managment routes
 def add_device():
     # Extract fields from form data with default value None if not present
     # device_type, field1, field2, field3, field4, field5, field6, field7, field8
-    device_type = request.form.get('device_type')
+    device_type = clean_data(request.form.get('device_type'))
+    roomID = clean_data(request.form.get('roomID'))
+
+    if not roomID:
+        return {'message': 'roomID is required'}, 400
 
     # Extract dynamic fields from form data (field1 to field8)
     fields = {}
     for i in range(1, 9):
-        fields[f'field{i}'] = request.form.get(f'field{i}', None)
+        fields[f'field{i}'] = clean_data(request.form.get(f'field{i}', None))
     
     # Create a new device object
     new_device = Devices(
         device_type=device_type,
+        roomID=roomID,
         **fields
     )
 
@@ -194,14 +345,15 @@ def get_devices():
             'fields': {}
         }
         for i in range(1, 9):
-            device_dict['fields'][f'field{i}'] = getattr(device, f'field{i}')
+            if getattr(device, f'field{i}') is not None:
+                device_dict['fields'][f'field{i}'] = getattr(device, f'field{i}')
         
         devices_list.append(device_dict)
     
     return jsonify(devices_list)
 
 # retrive specific device
-@propertymngt.route('/device/get_user/<int:id>', methods=['GET'])
+@propertymngt.route('/device/get_device/<int:id>', methods=['GET'])
 def get_device(id):
     device = db.session.query(Devices).filter_by(id=id).first()
     if device:
@@ -210,7 +362,8 @@ def get_device(id):
             'fields': {}
         }
         for i in range(1, 9):
-            device_dict['fields'][f'field{i}'] = getattr(device, f'field{i}')
+            if getattr(device, f'field{i}') is not None:
+                device_dict['fields'][f'field{i}'] = getattr(device, f'field{i}')
         
         return jsonify(device_dict)
     
@@ -245,7 +398,33 @@ def edit_device(id):
 """"
 Data entry managment routes
 """
-# update device data
+# update multiple data
+@propertymngt.route('/devices/update', methods=['GET'])
+def update_multiple_devices():
+    device_ids = request.args.getlist('id')
+    if not device_ids:
+        return {'message': 'No device IDs provided'}, 400
+
+    for device_id in device_ids:
+        device = db.session.query(Devices).filter_by(id=device_id).first()
+        if device:
+            fields = {}
+            for i in range(1, 9):
+                fields[f'field{i}'] = request.args.get(f'field{i}_{device_id}', None)
+
+            # Create a new entry in the Readings table
+            new_entry = Readings(
+                deviceID=device.id,
+                **fields
+            )
+
+            db.session.add(new_entry)
+        else:
+            return {'message': f'Device with id {device_id} not found'}, 404
+
+    db.session.commit()
+    return {'message': 'Entries updated'}
+
 @propertymngt.route('/device/<int:id>/update', methods=['GET'])
 def update_device_data(id):
     device = db.session.query(Devices).filter_by(id=id).first()
@@ -257,7 +436,7 @@ def update_device_data(id):
 
         # Create a new entry in the MetadataValues table
         new_entry = Readings(
-            deviceID=device.deviceID,
+            deviceID=device.id,
             **fields
         )
 
@@ -273,7 +452,7 @@ def get_device_data(id):
     device = db.session.query(Devices).filter_by(id=id).first()
 
     if device:
-        entries = db.session.query(Readings).filter_by(id=id).all()
+        entries = db.session.query(Readings).filter_by(deviceID=id).all()
         entry_list = []
 
         for entry in entries :
@@ -281,8 +460,9 @@ def get_device_data(id):
                 'deviceID' : entry.deviceID,
                 'fields': {}
             }
-            for i in range(1, 21):
-                entry_dict['fields'][f'field{i}'] = getattr(entry, f'field{i}')
+            for i in range(1, 9):
+                if getattr(entry, f'field{i}') is not None:
+                    entry_dict['fields'][f'field{i}'] = getattr(entry, f'field{i}')
             
             entry_list.append(entry_dict)
         
