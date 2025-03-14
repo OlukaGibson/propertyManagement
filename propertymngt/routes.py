@@ -224,7 +224,7 @@ def get_specific_room(id):
         for device in devices:
             device_dict = {
                 'deviceID': device.id,
-                'roomID': device.roomID,
+                # 'roomID': device.roomID,
                 'device_type': device.device_type,
                 'fields': {},
                 'readings': []  # Add readings key to store readings
@@ -239,7 +239,7 @@ def get_specific_room(id):
                 for reading in readings:
                     reading_dict = {
                         'readingID': reading.id,
-                        'deviceID': reading.deviceID,
+                        # 'deviceID': reading.deviceID,
                         'fields': {}
                     }
                     for i in range(1, 9):
@@ -255,7 +255,7 @@ def get_specific_room(id):
         for user in users_access:
             users_access_dict = {
                 'userID': user.userID,
-                'roomID': user.roomID,
+                # 'roomID': user.roomID,
                 'time_accessed': user.created_at
             }
             users_access_list.append(users_access_dict)
@@ -482,6 +482,9 @@ def recognize_faces():
         return jsonify({"error": "No file part in the request"}), 400
 
     file = request.files['file']
+    room_name = clean_data(request.form.get('room_name'))
+
+    room_ID = db.session.query(Rooms).filter_by(room_name=room_name).first().id
 
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
@@ -509,6 +512,7 @@ def recognize_faces():
             # Use the known face with the smallest distance to the new face
             face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
             best_match_index = np.argmin(face_distances)
+
             if matches[best_match_index]:
                 name = known_face_names[best_match_index]
 
@@ -523,6 +527,18 @@ def recognize_faces():
                     "left": left
                 }
             })
+
+            if name != "Unknown":
+                user = db.session.query(Users).filter_by(username=name).first()
+                if user:
+                    # Create a new entry in the UserRoomAccess table
+                    new_entry = UserRoomAccess(
+                        userID=user.id,
+                        roomID=room_ID
+                    )
+            
+                    db.session.add(new_entry)
+                    db.session.commit()
 
         # Delete the temporary file
         os.remove(temp_path)
