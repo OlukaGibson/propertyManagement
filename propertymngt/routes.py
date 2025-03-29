@@ -210,7 +210,7 @@ def get_specific_room(id):
         return {'message': 'Room not found'}, 404
 
     room_dict = {
-        'roomID': room.id,
+        'roomId': room.id,
         'room_name': room.room_name,
         'room_number': room.room_number
     }
@@ -239,6 +239,7 @@ def get_specific_room(id):
                 for reading in readings:
                     reading_dict = {
                         'readingID': reading.id,
+                        'timestamp': reading.created_at,
                         # 'deviceID': reading.deviceID,
                         'fields': {}
                     }
