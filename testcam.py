@@ -1,180 +1,117 @@
+import serial
+import time
+import requests
+import re
 import cv2
 import datetime
 import os
-import time
+import threading
 
-# Load the pre-trained Haar cascades for face and eye detection
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+# Serial port
+ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
 
-# Open the default camera (0)
-cap = cv2.VideoCapture(0)
-if not cap.isOpened():
-    print("Cannot access camera")
-    exit()
+# Open both cameras
+cam0 = cv2.VideoCapture('/dev/video0')  # Camera for Room1
+cam1 = cv2.VideoCapture('/dev/video2')  # Camera for Room2
 
-# Base directory for saving images
+if not cam0.isOpened():
+    print("Camera 0 not accessible")
+if not cam1.isOpened():
+    print("Camera 1 not accessible")
+
+# Image storage
 base_dir = "/home/gibson/Propertymanagement/images"
+image_url = "https://delicate-factually-mastiff.ngrok-free.app/recognize"
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        print("Failed to grab frame")
-        break
+# Data values
+current1_values = []
+current2_values = []
+relay1_status = 0
+relay2_status = 0
 
-    # Convert the frame to grayscale (Haar cascades work with grayscale images)
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+lock = threading.Lock()
 
-    # Detect faces in the frame
-    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-
-    # Loop through detected faces
-    for (x, y, w, h) in faces:
-        # Focus on the face region for eye detection
-        face_roi_gray = gray[y:y+h, x:x+w]
-
-        # Detect eyes within the face region
-        eyes = eye_cascade.detectMultiScale(face_roi_gray, scaleFactor=1.1, minNeighbors=10, minSize=(15, 15))
+def send_data():
+    with lock:
+        if not current1_values or not current2_values:
+            return
         
-        # If both face and eyes are detected, save the frame
-        if len(eyes) > 0:
-            # Get the current date and time
-            now = datetime.datetime.now()
-            date = now.strftime("%Y-%m-%d")
-            hour = now.strftime("%H")
-            timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
+        avg_current1 = sum(current1_values) / len(current1_values)
+        avg_current2 = sum(current2_values) / len(current2_values)
 
-            # Create the directory structure
-            save_dir = os.path.join(base_dir, date, hour)
-            os.makedirs(save_dir, exist_ok=True)
+        url = f"https://delicate-factually-mastiff.ngrok-free.app/devices/update?id=1&id=2&field1_1={relay1_status}&field2_1={avg_current1:.2f}&field1_2={relay2_status}&field2_2={avg_current2:.2f}"
+        try:
+            response = requests.get(url)
+            print("Sent sensor data:", response.status_code, response.text)
+        except Exception as e:
+            print("Error sending sensor data:", e)
 
-            # Save the frame as an image
-            filename = os.path.join(save_dir, f"detected_{timestamp}.png")
-            cv2.imwrite(filename, frame)
-            print(f"Saved: {filename}")
+        current1_values.clear()
+        current2_values.clear()
 
-    # Add a short delay to avoid overloading the CPU
-    time.sleep(0.1)
+def send_image_to_endpoint(image_path, room_name):
+    print(f"Sending image for room: {room_name}")  # Debugging log
+    with open(image_path, 'rb') as image_file:
+        files = {'file': image_file}
+        data = {'room_name': room_name}  # Include room_name in the POST request
+        response = requests.post(image_url, files=files, data=data)
+        print(f"[{room_name}] Image sent. Response: {response.json()}")
 
-# Release the video capture
-cap.release()
+def capture_image(room_name, camera):
+    print(f"Capturing image for room: {room_name}")  # Print the room_name attribute
+    ret, frame = camera.read()
+    if not ret:
+        print(f"[{room_name}] Failed to capture image")
+        return
 
+    now = datetime.datetime.now()
+    date = now.strftime("%Y-%m-%d")
+    hour = now.strftime("%H")
+    timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
 
-# import cv2
-# import datetime
-# import os
-# import face_recognition
-# import numpy as np
+    save_dir = os.path.join(base_dir, date, hour)
+    os.makedirs(save_dir, exist_ok=True)
 
-# # Load the pre-trained Haar cascades for face and eye detection
-# face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-# eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+    filename = os.path.join(save_dir, f"{room_name}_{timestamp}.png")
+    cv2.imwrite(filename, frame)
+    print(f"[{room_name}] Image captured:", filename)
 
-# # Open the default camera (0)
-# cap = cv2.VideoCapture(0)
-# if not cap.isOpened():
-#     print("Cannot access camera")
-#     exit()
+    send_image_to_endpoint(filename, room_name)
 
-# # Base directory for saving images
-# base_dir = "/home/gibson/Propertymanagement/images"
+# Background timer to send sensor data every 30 seconds
+def timer_loop():
+    while True:
+        time.sleep(30)
+        send_data()
 
-# # Known faces directory
-# KNOWN_FACES_DIR = "/home/gibson/Propertymanagement/faces"
+threading.Thread(target=timer_loop, daemon=True).start()
 
-# # Arrays to hold known face encodings and names
-# known_face_encodings = []
-# known_face_names = []
+# Main loop
+while True:
+    try:
+        line = ser.readline().decode('utf-8').strip()
+        if line:
+            print("Serial:", line)
 
-# # Load known faces from the directory
-# for folder_name in os.listdir(KNOWN_FACES_DIR):
-#     folder_path = os.path.join(KNOWN_FACES_DIR, folder_name)
-#     if os.path.isdir(folder_path):
-#         # Load the image named after the folder
-#         image_path = os.path.join(folder_path, f"{folder_name}.jpg")
-#         if os.path.exists(image_path):
-#             image = face_recognition.load_image_file(image_path)
-#             encoding = face_recognition.face_encodings(image)[0]
-#             known_face_encodings.append(encoding)
-#             known_face_names.append(folder_name)
+            if "Relay 1 is ON" in line:
+                relay1_status = 1
+                threading.Thread(target=capture_image, args=("room1", cam0), daemon=True).start()
+            elif "Relay 1 is OFF" in line:
+                relay1_status = 0
+            elif "Relay 2 is ON" in line:
+                relay2_status = 1
+                threading.Thread(target=capture_image, args=("room2", cam1), daemon=True).start()
+            elif "Relay 2 is OFF" in line:
+                relay2_status = 0
 
-# # Function to recognize faces
-# def recognize_faces(image):
-#     unknown_face_locations = face_recognition.face_locations(image)
-#     unknown_face_encodings = face_recognition.face_encodings(image, unknown_face_locations)
+            match1 = re.search(r"Current 1:\s*([\d.]+)\s*A", line)
+            match2 = re.search(r"Current 2:\s*([\d.]+)\s*A", line)
 
-#     results = []
+            with lock:
+                if match1:
+                    current1_values.append(float(match1.group(1)))
+                if match2:
+                    current2_values.append(float(match2.group(1)))
 
-#     for face_encoding, face_location in zip(unknown_face_encodings, unknown_face_locations):
-#         # See if the face is a match for the known faces
-#         matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
-#         name = "Unknown"
-
-#         # Use the known face with the smallest distance to the new face
-#         face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
-#         best_match_index = np.argmin(face_distances)
-#         if matches[best_match_index]:
-#             name = known_face_names[best_match_index]
-
-#         # Append the result
-#         top, right, bottom, left = face_location
-#         results.append({
-#             "name": name,
-#             "location": {
-#                 "top": top,
-#                 "right": right,
-#                 "bottom": bottom,
-#                 "left": left
-#             }
-#         })
-
-#     return results
-
-# while True:
-#     ret, frame = cap.read()
-#     if not ret:
-#         print("Failed to grab frame")
-#         break
-
-#     # Convert the frame to grayscale (Haar cascades work with grayscale images)
-#     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-#     # Detect faces in the frame
-#     faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-
-#     # Loop through detected faces
-#     for (x, y, w, h) in faces:
-#         # Focus on the face region for eye detection
-#         face_roi_gray = gray[y:y+h, x:x+w]
-
-#         # Detect eyes within the face region
-#         eyes = eye_cascade.detectMultiScale(face_roi_gray, scaleFactor=1.1, minNeighbors=10, minSize=(15, 15))
-
-#         # If both face and eyes are detected, process the frame
-#         if len(eyes) > 0:
-#             # Get the current date and time
-#             now = datetime.datetime.now()
-#             date = now.strftime("%Y-%m-%d")
-#             hour = now.strftime("%H")
-#             timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
-
-#             # Create the directory structure
-#             save_dir = os.path.join(base_dir, date, hour)
-#             os.makedirs(save_dir, exist_ok=True)
-
-#             # Save the frame as an image
-#             filename = os.path.join(save_dir, f"detected_{timestamp}.png")
-#             cv2.imwrite(filename, frame)
-#             print(f"Saved: {filename}")
-
-#             # Perform face recognition on the saved frame
-#             results = recognize_faces(frame)
-
-#             # Print recognition results
-#             print(f"Recognition Results: {results}")
-
-#             # Break after processing one frame to avoid overlap
-#             break
-
-# # Release the video capture
-# cap.release()
+    except Exception as e:
+        print("Error in main loop:", e)

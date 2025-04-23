@@ -68,17 +68,22 @@ def register_user():
     email = request.form['email']
     password = request.form['password']
 
+    # Upload to Google Cloud Storage
     storage_client = storage.Client(credentials=credentials)
     bucket = storage_client.bucket(os.getenv('BUCKET_NAME'))
     blob = bucket.blob(f'faces/{username}/{username}.jpg')
     blob.upload_from_file(file, content_type='application/octet-stream')
+
+    # Reset the file stream so it can be saved again
+    file.seek(0)
 
     # Save the image locally
     faces_dir = os.path.join('propertymngt', 'faces', username)
     os.makedirs(faces_dir, exist_ok=True)
     local_image_path = os.path.join(faces_dir, f'{username}.jpg')
     file.save(local_image_path)
-    
+
+    # Create and save user in the database
     new_user = Users(
         username=username,
         email=email,
@@ -88,7 +93,8 @@ def register_user():
     db.session.add(new_user)
     db.session.commit()
 
-    return{'message':'User successfuly registered'}
+    return {'message': 'User successfully registered'}
+
 
 #login user
 @propertymngt.route('/user/login', methods=['POST'])
@@ -473,7 +479,6 @@ def get_device_data(id):
 """"
 Facial recognition routes
 """
-
 @propertymngt.route('/recognize', methods=['POST'])
 def recognize_faces():
     """
@@ -485,7 +490,12 @@ def recognize_faces():
     file = request.files['file']
     room_name = clean_data(request.form.get('room_name'))
 
-    room_ID = db.session.query(Rooms).filter_by(room_name=room_name).first().id
+    # Query the room by name
+    room = db.session.query(Rooms).filter_by(room_name=room_name).first()
+    if not room:
+        return jsonify({"error": f"Room with name '{room_name}' not found"}), 404
+
+    room_ID = room.id
 
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
@@ -535,7 +545,7 @@ def recognize_faces():
                     # Create a new entry in the UserRoomAccess table
                     new_entry = UserRoomAccess(
                         userID=user.id,
-                        roomID=room_ID
+                        roomID=room_ID  # Use the valid room_ID here
                     )
             
                     db.session.add(new_entry)
